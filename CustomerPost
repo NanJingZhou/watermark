@@ -1,0 +1,58 @@
+private String buildSchemaPostCommand(Integer userId, DemandDTO demand,
+                                          List<DemandProjectAssn> schemas, DemandLocationDTO location, Map<String, String> regionMap) {
+        String qrCodeUrl = createSchemaQrCode(demand.getId(), userId);
+        if (StringUtils.isEmpty(qrCodeUrl)) {
+            logger.error("create scheme post qrcode failed", new RuntimeException());
+            return null;
+        }
+        List<String> postTexts = Lists.newArrayList();
+        String tenantName = demandService.queryTenantNameByDemandId(demand.getId());
+        if (StringUtils.isNotEmpty(tenantName)) {
+            postTexts.add("客户：" + tenantName);
+        }
+        String market = "";
+        if (location.getMarketId() != null) {
+            market = regionMap.getOrDefault(String.valueOf(location.getMarketId()), "");
+        }
+        String position = String.format("位置：%s%s%s", regionMap.getOrDefault(location.getCityCode(), ""),
+                regionMap.getOrDefault(location.getDistrictCode(), ""), market);
+        if (StringUtils.isEmpty(location.getCityCode())) {
+            position = "位置：" + regionMap.get(location.getProvinceCode());
+        }
+        if (demand.getDemandLocationList().size() > 1) {
+            position = position + String.format("等%d个选址区域", demand.getDemandLocationList().size());
+        }
+
+        postTexts.add(position);
+        postTexts.add(getSchemaPostArea(demand));
+        if (demand.getStorageUsage().equals(DemandStorageUsage.STORAGE.value)) {
+            if (StringUtils.isEmpty(demand.getProduct())) {
+                Map<Integer, String> productMap = demandService.listDemandProductDto().stream()
+                        .collect(Collectors.toMap(ProductTypeDto::getId, ProductTypeDto::getName));
+                postTexts.add("存放物品：" + productMap.get(demand.getProductType()));
+            } else {
+                postTexts.add("存放物品：" + demand.getProduct());
+            }
+        } else {
+            postTexts.add("生产物品：" + demand.getIndustryDetail());
+        }
+        UserEmployeeDTO user = userService.getInfoById(userId);
+        postTexts.add(String.format("%s为您推荐%s套方案，赶紧扫码查看吧！", user.getName(), schemas.size()));
+
+        QiniuWmText.Builder textBuilder = QiniuWmText.builder().gravity("West").fontSize(660).fill("#fff").dx(64);
+        List<String> commands = Lists.newArrayList();
+        for (int i = 0; i < postTexts.size(); i++) {
+            commands.add(textBuilder.data(postTexts.get(i)).dy(-10 + 60 * i).cmd());
+        }
+
+        String headImage = "https://touxiang.toodc.cn/107_201995146.png-agent_white_ground";
+        if (StringUtils.isNotEmpty(user.getPhotoPath())) {
+            headImage = String.format("https://touxiang.toodc.cn/%s-agent_white_ground", user.getPhotoPath());
+        }
+        commands.add(QiniuWmPhoto.builder().gravity("SouthEast").dx(44).dy(108).ws(0.29).data(qrCodeUrl).cmd());
+        commands.add(QiniuWmPhoto.builder().gravity("SouthWest").dx(61).dy(134).ws(0.15).data(headImage).cmd());
+        commands.add(QiniuWmPhoto.builder().gravity("SouthEast").dx(130).dy(200).ws(0.05).data("http://outter-common.toodc.cn/schema/post/logo1.jpg").cmd());
+        commands.add(QiniuWmText.builder().gravity("SouthWest").fontSize(760).dx(190).dy(196).data(user.getName()).cmd());
+        commands.add(QiniuWmText.builder().gravity("SouthWest").fontSize(720).dx(190).dy(130).font("微软雅黑").data(user.getPhone()).cmd());
+        return "https://outter-common.toodc.cn/schema/post/background1.png?watermark/3" + Joiner.on("").join(commands);
+    }
